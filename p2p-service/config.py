@@ -1,0 +1,2 @@
+# Minimal configuration placeholder
+config = {}
