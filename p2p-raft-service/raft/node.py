@@ -62,6 +62,8 @@ class RaftNode:
 
         self._commit_listeners: List[Callable[[RaftLogEntry], None]] = []
 
+        print(f"📋 RaftNode initialized: {node_id} | Peers: {peer_ids} | Role: FOLLOWER")
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -137,6 +139,8 @@ class RaftNode:
             last_log_index = self.last_log_index()
             last_log_term = self.last_log_term()
 
+        print(f"🗳️  STARTING ELECTION - Node: {self.node_id} | Term: {term} | LastLogIndex: {last_log_index}")
+
         request = p2p_pb2.RequestVoteRequest(
             candidate_id=self.node_id,
             term=term,
@@ -152,10 +156,13 @@ class RaftNode:
 
         for future in as_completed(futures):
             response = future.result()
+            peer_id = futures[future]
             if response is None:
+                print(f"❌ No response from {peer_id} during election (Term {term})")
                 continue
             with self._lock:
                 if response.term > self.current_term:
+                    print(f"📉 Stepping down: Discovered higher term {response.term} > {self.current_term}")
                     self.current_term = response.term
                     self.role = Role.FOLLOWER
                     self.voted_for = None
@@ -165,9 +172,12 @@ class RaftNode:
                     return
                 if response.vote_granted:
                     votes += 1
+                    print(f"✅ Vote granted from {peer_id} | Total votes: {votes}/{self._quorum_size()}")
                     if votes >= self._quorum_size():
                         self._become_leader()
                         return
+                else:
+                    print(f"❌ Vote denied from {peer_id}")
 
     def _become_leader(self) -> None:
         self.role = Role.LEADER
@@ -176,6 +186,7 @@ class RaftNode:
             self.next_index[peer] = self.last_log_index() + 1
             self.match_index[peer] = 0
         self._last_heartbeat_sent = 0.0
+        print(f"👑 ELECTED AS LEADER - Node: {self.node_id} | Term: {self.current_term}")
 
     # ------------------------------------------------------------------
     # Leader-side replication
@@ -192,6 +203,7 @@ class RaftNode:
             entry.event.raft_index = entry.index
             self.log.append(entry)
             entry_index = entry.index
+            print(f"📝 Leader appending command | Index: {entry_index} | Type: {event.command_type} | Term: {self.current_term}")
             if not self.peer_ids:
                 # Single-node cluster commits immediately.
                 self.commit_index = entry_index
@@ -248,9 +260,12 @@ class RaftNode:
                 match_index = prev_index + len(entries)
                 self.match_index[peer_id] = match_index
                 self.next_index[peer_id] = match_index + 1
+                if len(entries) > 0:
+                    print(f"✅ Replicated {len(entries)} entries to {peer_id} | Match index: {match_index}")
                 advanced = self._advance_commit_index_locked()
             else:
                 self.next_index[peer_id] = max(1, next_idx - 1)
+                print(f"⚠️  Replication to {peer_id} failed, decrementing next_index to {self.next_index[peer_id]}")
                 advanced = False
 
         if advanced:
@@ -258,12 +273,15 @@ class RaftNode:
 
     def _advance_commit_index_locked(self) -> bool:
         advanced = False
+        old_commit = self.commit_index
         for index in range(self.commit_index + 1, self.last_log_index() + 1):
             replicated = sum(1 for m in self.match_index.values() if m >= index)
             if replicated + 1 >= self._quorum_size():
                 if self.log[index - 1].term == self.current_term:
                     self.commit_index = index
                     advanced = True
+        if advanced:
+            print(f"✅ COMMIT INDEX ADVANCED: {old_commit} → {self.commit_index} | Entries committed")
         return advanced
 
     # ------------------------------------------------------------------
@@ -275,10 +293,13 @@ class RaftNode:
                 return False
 
             if request.term > self.current_term:
+                print(f"📈 Updating term: {self.current_term} → {request.term}")
                 self.current_term = request.term
                 self.voted_for = None
 
             self.role = Role.FOLLOWER
+            if self.leader_id != request.leader_id:
+                print(f"👤 Following leader: {request.leader_id} | Term: {request.term}")
             self.leader_id = request.leader_id
             self._reset_election_deadline()
 
@@ -289,7 +310,13 @@ class RaftNode:
             self._delete_conflicting_entries(entries)
             self._append_new_entries(entries)
 
+            if len(entries) > 0:
+                print(f"📥 Received {len(entries)} entries from leader {request.leader_id}")
+
+            old_commit = self.commit_index
             self.commit_index = min(request.leader_commit, self.last_log_index())
+            if self.commit_index > old_commit:
+                print(f"✅ Follower commit index advanced: {old_commit} → {self.commit_index}")
 
         self._apply_committed_entries()
         return True
@@ -300,6 +327,7 @@ class RaftNode:
                 return False
 
             if request.term > self.current_term:
+                print(f"📈 Updating term: {self.current_term} → {request.term}")
                 self.current_term = request.term
                 self.voted_for = None
                 self.role = Role.FOLLOWER
@@ -319,6 +347,7 @@ class RaftNode:
 
             self.voted_for = request.candidate_id
             self._reset_election_deadline()
+            print(f"✅ Voted for {request.candidate_id} in term {request.term}")
             return True
 
     def handle_install_snapshot(self, request: p2p_pb2.InstallSnapshotRequest) -> None:
@@ -381,5 +410,6 @@ class RaftNode:
                 entries_to_apply.append(self.log[self.last_applied - 1])
 
         for entry in entries_to_apply:
+            print(f"🔄 Applying committed entry | Index: {entry.index} | Type: {entry.event.command_type}")
             for listener in self._commit_listeners:
                 listener(entry)

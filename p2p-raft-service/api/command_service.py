@@ -34,19 +34,33 @@ class CommandServiceServicer(p2p_pb2_grpc.CommandServiceServicer):
 
     def SubmitCommand(self, request, context) -> p2p_pb2.CommandResponse:
         if not self.raft_node.is_leader():
+            leader_id = self.raft_node.get_leader_id()
+            leader_addr = self._leader_address()
+            print(f"🔀 Not leader, redirecting to {leader_id} at {leader_addr}")
             return p2p_pb2.CommandResponse(
                 accepted=False,
-                leader_id=self.raft_node.get_leader_id(),
-                leader_address=self._leader_address(),
+                leader_id=leader_id,
+                leader_address=leader_addr,
                 committed=False,
                 commit_index=0,
             )
 
         event = Event.from_command_request(request, cluster_id=self.cluster_id)
+        print(
+            f"📨 Received command | Type: {event.command_type} | Payload: {event.payload}"
+        )
+
         entry_index = self.raft_node.append_command(event)
+        print(f"⏳ Waiting for commit | Index: {entry_index}")
+
         committed = self._commit_tracker.wait_for_commit(
             entry_index, timeout_s=self._command_timeout_s
         )
+
+        if committed:
+            print(f"✅ Command committed | Index: {entry_index}")
+        else:
+            print(f"⏱️  Command timeout | Index: {entry_index}")
 
         return p2p_pb2.CommandResponse(
             accepted=True,

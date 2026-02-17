@@ -20,11 +20,21 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (now includes auth folder)
 COPY . .
 
-# Copy .env file if it exists (optional)
-COPY .env* ./
+# Regenerate protobuf files with correct imports
+RUN cd proto && \
+    python -m grpc_tools.protoc \
+    -I. \
+    --python_out=. \
+    --pyi_out=. \
+    --grpc_python_out=. \
+    ehr_service.proto p2p.proto
+
+# Fix imports in generated files to use relative imports
+RUN sed -i 's/^import \(.*\)_pb2 as/from . import \1_pb2 as/g' proto/*_pb2_grpc.py; exit 0
+
 
 # Expose API Gateway port
 EXPOSE 8080

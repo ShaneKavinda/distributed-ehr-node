@@ -65,9 +65,11 @@ class GrpcServer:
         )
 
         self._server.add_insecure_port(f"[::]:{port}")
+        self._port = port
 
     def start(self) -> None:
         self._server.start()
+        print(f"✅ gRPC server started on port {self._port}")
 
     def block_forever(self) -> None:
         try:
