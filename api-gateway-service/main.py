@@ -1,11 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Query
-from typing import List
-import grpc.aio
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
+from grpc_client import GrpcClient
 from models import (
     PatientCreate,
     PatientUpdate,
@@ -13,7 +6,20 @@ from models import (
     DeleteResponse,
     ErrorResponse
 )
-from grpc_client import GrpcClient
+from fastapi import FastAPI, HTTPException, status, Depends, Query
+from typing import List
+import grpc.aio
+from dotenv import load_dotenv
+import os
+from auth.auth import (
+    get_current_user,
+    require_doctor,
+    require_doctor_or_patient
+)
+from auth.routes import router as auth_router
+
+load_dotenv()
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -23,6 +29,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+app.include_router(auth_router)
 
 # Configuration from environment variables
 GRPC_HOST = os.getenv('GRPC_HOST', 'localhost')
@@ -53,7 +61,7 @@ async def root():
         500: {"model": ErrorResponse, "description": "Internal server error"}
     }
 )
-async def create_patient(patient: PatientCreate):
+async def create_patient(patient: PatientCreate, user=Depends(require_doctor)):
     """
     Create a new patient record.
 
@@ -63,6 +71,7 @@ async def create_patient(patient: PatientCreate):
     - **contacts**: Address, phone, email
     - **sourceHospital**: Name of the hospital node creating the record
     """
+
     try:
         async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
             patient_data = patient.model_dump()
@@ -74,7 +83,8 @@ async def create_patient(patient: PatientCreate):
         elif e.code() == grpc.StatusCode.ALREADY_EXISTS:
             raise HTTPException(status_code=409, detail=e.details())
         else:
-            raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+            raise HTTPException(
+                status_code=500, detail=f"gRPC error: {e.details()}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -90,12 +100,15 @@ async def create_patient(patient: PatientCreate):
         500: {"model": ErrorResponse, "description": "Internal server error"}
     }
 )
-async def get_patient(patient_uuid: str):
+async def get_patient(patient_uuid: str, user=Depends(require_doctor_or_patient)):
     """
     Retrieve a patient by their UUID.
 
     - **patient_uuid**: The unique UUID of the patient
     """
+    if user["role"] == "patient" and user["patient_uuid"] != patient_uuid:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     try:
         async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
             result = await client.get_patient(patient_uuid)
@@ -106,7 +119,8 @@ async def get_patient(patient_uuid: str):
         elif e.code() == grpc.StatusCode.INVALID_ARGUMENT:
             raise HTTPException(status_code=400, detail=e.details())
         else:
-            raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+            raise HTTPException(
+                status_code=500, detail=f"gRPC error: {e.details()}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -123,7 +137,9 @@ async def get_patient(patient_uuid: str):
 )
 async def get_all_patients(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return")
+    limit: int = Query(100, ge=1, le=1000,
+                       description="Maximum number of records to return"),
+    user=Depends(require_doctor)
 ):
     """
     Retrieve all patients with pagination.
@@ -136,7 +152,8 @@ async def get_all_patients(
             results = await client.get_all_patients(skip=skip, limit=limit)
             return [PatientResponse(**r) for r in results]
     except grpc.aio.AioRpcError as e:
-        raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+        raise HTTPException(
+            status_code=500, detail=f"gRPC error: {e.details()}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -152,7 +169,7 @@ async def get_all_patients(
         500: {"model": ErrorResponse, "description": "Internal server error"}
     }
 )
-async def search_patient_by_id(patient_id: str):
+async def search_patient_by_id(patient_id: str, user=Depends(require_doctor)):
     """
     Search for a patient by their patient_id.
 
@@ -166,7 +183,8 @@ async def search_patient_by_id(patient_id: str):
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())
         else:
-            raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+            raise HTTPException(
+                status_code=500, detail=f"gRPC error: {e.details()}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -183,7 +201,7 @@ async def search_patient_by_id(patient_id: str):
         500: {"model": ErrorResponse, "description": "Internal server error"}
     }
 )
-async def update_patient(patient_uuid: str, patient: PatientUpdate):
+async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends(require_doctor)):
     """
     Update a patient's information.
 
@@ -195,7 +213,8 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate):
             # Only include fields that are not None
             patient_data = patient.model_dump(exclude_none=True)
             if not patient_data:
-                raise HTTPException(status_code=400, detail="No fields to update")
+                raise HTTPException(
+                    status_code=400, detail="No fields to update")
 
             result = await client.update_patient(patient_uuid, patient_data)
             return PatientResponse(**result)
@@ -205,12 +224,12 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate):
         elif e.code() == grpc.StatusCode.INVALID_ARGUMENT:
             raise HTTPException(status_code=400, detail=e.details())
         else:
-            raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+            raise HTTPException(
+                status_code=500, detail=f"gRPC error: {e.details()}")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.delete(
@@ -224,7 +243,7 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate):
         500: {"model": ErrorResponse, "description": "Internal server error"}
     }
 )
-async def delete_patient(patient_uuid: str):
+async def delete_patient(patient_uuid: str, user=Depends(require_doctor)):
     """
     Delete a patient record.
 
@@ -240,7 +259,8 @@ async def delete_patient(patient_uuid: str):
         elif e.code() == grpc.StatusCode.INVALID_ARGUMENT:
             raise HTTPException(status_code=400, detail=e.details())
         else:
-            raise HTTPException(status_code=500, detail=f"gRPC error: {e.details()}")
+            raise HTTPException(
+                status_code=500, detail=f"gRPC error: {e.details()}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -263,4 +283,3 @@ if __name__ == '__main__':
         reload=True,
         log_level="info"
     )
-
