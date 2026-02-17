@@ -1,0 +1,4 @@
+resources:
+- service-headless.yaml
+- service-api.yaml
+- statefulset.yaml

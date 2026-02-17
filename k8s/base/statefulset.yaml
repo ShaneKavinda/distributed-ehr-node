@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hospital
+  labels:
+    app: hospital
+spec:
+  serviceName: hospital-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hospital
+  template:
+    metadata:
+      labels:
+        app: hospital
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:7.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+          name: mongodb
+        env:
+        - name: MONGO_INITDB_DATABASE
+          value: ehr_database
+        volumeMounts:
+        - name: mongo-data
+          mountPath: /data/db
+      - name: ehr-crud
+        image: ehr-crud-service:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 50051
+          name: ehr-grpc
+        env:
+        - name: MONGODB_URL
+          value: mongodb://localhost:27017
+        - name: DATABASE_NAME
+          value: ehr_database
+        - name: GRPC_HOST
+          value: 0.0.0.0
+        - name: GRPC_PORT
+          value: "50051"
+      - name: p2p-raft
+        image: p2p-raft-service:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 7001
+          name: raft
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: GRPC_PORT
+          value: "7001"
+        - name: PEERS
+          value: hospital-0=hospital-0.hospital-headless:7001,hospital-1=hospital-1.hospital-headless:7001,hospital-2=hospital-2.hospital-headless:7001
+        - name: CLUSTER_ID
+          value: hospital-a
+        - name: EHR_GRPC_HOST
+          value: localhost
+        - name: EHR_GRPC_PORT
+          value: "50051"
+        - name: COMMAND_TIMEOUT_MS
+          value: "4000"
+      - name: api-gateway
+        image: api-gateway-service:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: GRPC_HOST
+          value: localhost
+        - name: GRPC_PORT
+          value: "50051"
+        - name: P2P_HOST
+          value: localhost
+        - name: P2P_PORT
+          value: "7001"
+        - name: P2P_TIMEOUT
+          value: "3.0"
+        - name: API_HOST
+          value: 0.0.0.0
+        - name: API_PORT
+          value: "8080"
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi

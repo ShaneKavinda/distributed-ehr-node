@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hospital
+spec:
+  template:
+    spec:
+      containers:
+      - name: p2p-raft
+        env:
+        - name: PEERS
+          value: hospital-0=hospital-0.hospital-headless.hospital-h1.svc.cluster.local:7001,hospital-1=hospital-1.hospital-headless.hospital-h1.svc.cluster.local:7001,hospital-2=hospital-2.hospital-headless.hospital-h1.svc.cluster.local:7001
+        - name: CLUSTER_ID
+          value: hospital-h1

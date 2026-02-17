@@ -1,2 +1,0 @@
-# Minimal configuration placeholder
-config = {}
