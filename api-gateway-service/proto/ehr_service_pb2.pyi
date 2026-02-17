@@ -2,12 +2,13 @@ from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
+from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class PatientMessage(_message.Message):
-    __slots__ = ("id", "version", "lastUpdated", "identity", "demographics", "contacts", "conditions", "allergies", "meta", "created_at", "updated_at")
+    __slots__ = ("id", "version", "lastUpdated", "identity", "demographics", "contacts", "conditions", "meta", "created_at", "updated_at")
     ID_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     LASTUPDATED_FIELD_NUMBER: _ClassVar[int]
@@ -15,7 +16,6 @@ class PatientMessage(_message.Message):
     DEMOGRAPHICS_FIELD_NUMBER: _ClassVar[int]
     CONTACTS_FIELD_NUMBER: _ClassVar[int]
     CONDITIONS_FIELD_NUMBER: _ClassVar[int]
-    ALLERGIES_FIELD_NUMBER: _ClassVar[int]
     META_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -26,11 +26,10 @@ class PatientMessage(_message.Message):
     demographics: _struct_pb2.Struct
     contacts: _struct_pb2.Struct
     conditions: _struct_pb2.ListValue
-    allergies: _struct_pb2.ListValue
     meta: _struct_pb2.Struct
     created_at: str
     updated_at: str
-    def __init__(self, id: _Optional[str] = ..., version: _Optional[int] = ..., lastUpdated: _Optional[str] = ..., identity: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., demographics: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., contacts: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., conditions: _Optional[_Union[_struct_pb2.ListValue, _Mapping]] = ..., allergies: _Optional[_Union[_struct_pb2.ListValue, _Mapping]] = ..., meta: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., created_at: _Optional[str] = ..., updated_at: _Optional[str] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., version: _Optional[int] = ..., lastUpdated: _Optional[str] = ..., identity: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., demographics: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., contacts: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., conditions: _Optional[_Union[_struct_pb2.ListValue, _Mapping]] = ..., meta: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., created_at: _Optional[str] = ..., updated_at: _Optional[str] = ...) -> None: ...
 
 class CreatePatientRequest(_message.Message):
     __slots__ = ("patientData",)

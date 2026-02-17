@@ -24,6 +24,9 @@ API Gateway (FastAPI)
 CRUD Service (gRPC Server)
     ↓ MongoDB Driver
 MongoDB (port 27017)
+
+RabbitMQ (ports 5672, 15672)
+    ↕ Message Queue (future inter-service communication)
 ```
 
 ---
@@ -48,6 +51,12 @@ MongoDB (port 27017)
   - `crud_service.py` - CRUD operations
   - `database.py` - MongoDB connection
   - `models.py` - Database models
+
+### RabbitMQ
+- **Technology:** RabbitMQ 3.13 with Management Plugin
+- **Ports:** 5672 (AMQP), 15672 (Management UI)
+- **Purpose:** Message broker for inter-service communication
+- **Access:** http://localhost:15672 (user: `admin`, password: `admin123`)
 
 ---
 
@@ -74,13 +83,13 @@ MongoDB (port 27017)
 - ✅ Demographics (name, DOB, gender)
 - ✅ Contacts (address, phone, email)
 - ✅ Conditions (diagnoses)
-- ✅ Allergies
 - ✅ Metadata (sourceHospital, version)
 
 **Removed for simplicity:**
 - ❌ Encounters
 - ❌ Medications
 - ❌ Consents
+- ❌ Allergies
 
 ---
 
@@ -89,7 +98,7 @@ MongoDB (port 27017)
 ### Quick Start (Recommended)
 
 ```bash
-# Start all services (MongoDB, gRPC, API Gateway)
+# Start all services (MongoDB, RabbitMQ, gRPC, API Gateway)
 docker compose up -d
 
 # Check status
@@ -102,16 +111,19 @@ docker compose logs -f
 docker compose down
 ```
 
-**Access API:** http://localhost:8080/docs
+**Access Points:**
+- API Docs: http://localhost:8080/docs
+- RabbitMQ Management UI: http://localhost:15672 (admin/admin123)
 
 ### What Docker Compose Does
 
 1. Starts **MongoDB** container (port 27017)
-2. Starts **EHR CRUD Service** (port 50051)
-3. Starts **API Gateway** (port 8080)
-4. Creates isolated Docker network
-5. Sets up health checks
-6. Configures automatic restarts
+2. Starts **RabbitMQ** container (ports 5672, 15672)
+3. Starts **EHR CRUD Service** (port 50051)
+4. Starts **API Gateway** (port 8080)
+5. Creates isolated Docker network
+6. Sets up health checks
+7. Configures automatic restarts
 
 ### Useful Commands
 

@@ -33,20 +33,8 @@ class ContactInfo(BaseModel):
     email: Optional[str] = None
 
 
-class Encounter(BaseModel):
-    """Individual encounter/visit record"""
-    encounterId: str
-    type: str
-    start: datetime
-    end: Optional[datetime] = None
-    location: Optional[str] = None
-    provider: Optional[str] = None
-    reason: Optional[str] = None
-
-
 class Condition(BaseModel):
     """Patient condition/diagnosis"""
-    id: str
     code: Optional[str] = None
     system: Optional[str] = None
     description: str
@@ -55,52 +43,6 @@ class Condition(BaseModel):
     recordedAt: datetime
     encounterId: Optional[str] = None
 
-
-class Allergy(BaseModel):
-    """Patient allergy information"""
-    substance: str
-    reaction: Optional[str] = None
-    severity: Optional[str] = None
-    status: str = "active"
-    recordedAt: datetime
-
-
-class Medication(BaseModel):
-    """Active medication"""
-    medId: str
-    drug: str
-    dose: Optional[str] = None
-    route: Optional[str] = None
-    frequency: Optional[str] = None
-    start: date
-    end: Optional[date] = None
-    prescriber: Optional[str] = None
-
-
-class MedicationHistory(BaseModel):
-    """Historical medication record"""
-    drug: str
-    start: date
-    end: Optional[date] = None
-    reasonStopped: Optional[str] = None
-
-
-class MedicationsInfo(BaseModel):
-    """Medications section"""
-    active: List[Medication] = Field(default_factory=list)
-    history: List[MedicationHistory] = Field(default_factory=list)
-
-
-class ConsentInfo(BaseModel):
-    """Patient consent information"""
-    allowed: bool = True
-    scope: List[str] = Field(default_factory=list)
-    grantedAt: Optional[datetime] = None
-
-
-class ConsentsInfo(BaseModel):
-    """Consents section"""
-    dataSharing: Optional[ConsentInfo] = None
 
 
 class MetaInfo(BaseModel):
@@ -149,7 +91,6 @@ class PatientUpdate(BaseModel):
     demographics: Optional[Demographics] = None
     contacts: Optional[ContactInfo] = None
     conditions: Optional[List[Condition]] = None
-    allergies: Optional[List[Allergy]] = None
 
 
 class PatientResponse(BaseModel):
@@ -161,7 +102,6 @@ class PatientResponse(BaseModel):
     demographics: Demographics
     contacts: Optional[ContactInfo] = None
     conditions: List[Condition] = Field(default_factory=list)
-    allergies: List[Allergy] = Field(default_factory=list)
     meta: MetaInfo
     created_at: datetime
     updated_at: datetime
@@ -191,7 +131,6 @@ class PatientResponse(BaseModel):
                     "phone": "+358..."
                 },
                 "conditions": [],
-                "allergies": [],
                 "meta": {
                     "sourceHospital": "HOSP-A",
                     "replicaVector": {}

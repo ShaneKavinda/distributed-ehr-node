@@ -39,12 +39,11 @@ message PatientMessage {
 
     // Clinical data as JSON arrays
     google.protobuf.ListValue conditions = 7;
-    google.protobuf.ListValue allergies = 8;
 
-    google.protobuf.Struct meta = 9;
+    google.protobuf.Struct meta = 8;
 
-    string created_at = 10;
-    string updated_at = 11;
+    string created_at = 9;
+    string updated_at = 10;
 }
 
 // Request messages

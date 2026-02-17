@@ -124,6 +124,5 @@ class GrpcClient:
 
         # Convert ListValue fields to Python lists
         result['conditions'] = [MessageToDict(item) for item in patient_proto.conditions]
-        result['allergies'] = [MessageToDict(item) for item in patient_proto.allergies]
 
         return result

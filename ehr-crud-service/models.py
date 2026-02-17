@@ -1,4 +1,4 @@
-from beanie import Document, Indexed
+from beanie import Document
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import date, datetime, timezone
@@ -35,20 +35,8 @@ class ContactInfo(BaseModel):
     email: Optional[str] = None
 
 
-class Encounter(BaseModel):
-    """Individual encounter/visit record"""
-    encounterId: str
-    type: str = Field(..., description="encounter type: outpatient, inpatient, emergency")
-    start: datetime
-    end: Optional[datetime] = None
-    location: Optional[str] = None
-    provider: Optional[str] = None
-    reason: Optional[str] = None
-
-
 class Condition(BaseModel):
     """Patient condition/diagnosis"""
-    id: str
     code: Optional[str] = None
     system: Optional[str] = Field(None, description="e.g., ICD-10")
     description: str
@@ -57,52 +45,6 @@ class Condition(BaseModel):
     recordedAt: datetime
     encounterId: Optional[str] = None
 
-
-class Allergy(BaseModel):
-    """Patient allergy information"""
-    substance: str
-    reaction: Optional[str] = None
-    severity: Optional[str] = Field(None, description="mild, moderate, severe")
-    status: str = Field(default="active")
-    recordedAt: datetime
-
-
-class Medication(BaseModel):
-    """Active medication"""
-    medId: str
-    drug: str
-    dose: Optional[str] = None
-    route: Optional[str] = None
-    frequency: Optional[str] = None
-    start: date
-    end: Optional[date] = None
-    prescriber: Optional[str] = None
-
-
-class MedicationHistory(BaseModel):
-    """Historical medication record"""
-    drug: str
-    start: date
-    end: Optional[date] = None
-    reasonStopped: Optional[str] = None
-
-
-class MedicationsInfo(BaseModel):
-    """Medications section"""
-    active: List[Medication] = Field(default_factory=list)
-    history: List[MedicationHistory] = Field(default_factory=list)
-
-
-class ConsentInfo(BaseModel):
-    """Patient consent information"""
-    allowed: bool = Field(default=True)
-    scope: List[str] = Field(default_factory=list)
-    grantedAt: Optional[datetime] = None
-
-
-class ConsentsInfo(BaseModel):
-    """Consents section"""
-    dataSharing: Optional[ConsentInfo] = None
 
 
 class MetaInfo(BaseModel):
@@ -124,11 +66,7 @@ class PatientUpdate(BaseModel):
     """Model for updating patient - all fields optional"""
     demographics: Optional[Demographics] = None
     contacts: Optional[ContactInfo] = None
-    encounters: Optional[List[Encounter]] = None
     conditions: Optional[List[Condition]] = None
-    allergies: Optional[List[Allergy]] = None
-    medications: Optional[MedicationsInfo] = None
-    consents: Optional[ConsentsInfo] = None
 
 
 # Main Patient Document for MongoDB
@@ -149,7 +87,6 @@ class Patient(Document):
 
     # Clinical data (time-ordered arrays)
     conditions: List[Condition] = Field(default_factory=list)
-    allergies: List[Allergy] = Field(default_factory=list)
 
     # Distributed system metadata
     meta: MetaInfo
