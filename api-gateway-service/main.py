@@ -6,20 +6,8 @@ from models import (
     DeleteResponse,
     ErrorResponse
 )
-from fastapi import FastAPI, HTTPException, status, Depends, Query
-from typing import List
-import grpc.aio
-from dotenv import load_dotenv
-import os
-from auth.auth import (
-    get_current_user,
-    require_doctor,
-    require_doctor_or_patient
-)
-from auth.routes import router as auth_router
-
-load_dotenv()
-
+from grpc_client import GrpcClient
+from p2p_client import P2PCommandClient
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -37,6 +25,9 @@ GRPC_HOST = os.getenv('GRPC_HOST', 'localhost')
 GRPC_PORT = int(os.getenv('GRPC_PORT', '50051'))
 API_HOST = os.getenv('API_HOST', '0.0.0.0')
 API_PORT = int(os.getenv('API_PORT', '8080'))
+P2P_HOST = os.getenv('P2P_HOST', 'localhost')
+P2P_PORT = int(os.getenv('P2P_PORT', '7001'))
+P2P_TIMEOUT = float(os.getenv('P2P_TIMEOUT', '3.0'))
 
 
 @app.get("/", tags=["Health"])
@@ -73,9 +64,21 @@ async def create_patient(patient: PatientCreate, user=Depends(require_doctor)):
     """
 
     try:
+        patient_data = patient.model_dump()
+        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+            response = await p2p.submit_command("PATIENT_CREATE", patient_data)
+            if not response.accepted:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Raft leader unavailable. leader_id={response.leader_id}"
+                )
+            if not response.committed:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Command accepted but not committed"
+                )
         async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
-            patient_data = patient.model_dump()
-            result = await client.create_patient(patient_data)
+            result = await client.search_patient_by_id(patient.identity.patientId)
             return PatientResponse(**result)
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.INVALID_ARGUMENT:
@@ -209,14 +212,29 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends
     - All fields are optional - only provided fields will be updated
     """
     try:
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
-            # Only include fields that are not None
-            patient_data = patient.model_dump(exclude_none=True)
-            if not patient_data:
-                raise HTTPException(
-                    status_code=400, detail="No fields to update")
+        # Only include fields that are not None
+        patient_data = patient.model_dump(exclude_none=True)
+        if not patient_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
 
-            result = await client.update_patient(patient_uuid, patient_data)
+        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+            response = await p2p.submit_command(
+                "PATIENT_UPDATE",
+                {"patient_uuid": patient_uuid, "update": patient_data},
+            )
+            if not response.accepted:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Raft leader unavailable. leader_id={response.leader_id}"
+                )
+            if not response.committed:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Command accepted but not committed"
+                )
+
+        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+            result = await client.get_patient(patient_uuid)
             return PatientResponse(**result)
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.NOT_FOUND:
@@ -250,9 +268,22 @@ async def delete_patient(patient_uuid: str, user=Depends(require_doctor)):
     - **patient_uuid**: The unique UUID of the patient
     """
     try:
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
-            result = await client.delete_patient(patient_uuid)
-            return DeleteResponse(**result)
+        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+            response = await p2p.submit_command(
+                "PATIENT_DELETE",
+                {"patient_uuid": patient_uuid},
+            )
+            if not response.accepted:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Raft leader unavailable. leader_id={response.leader_id}"
+                )
+            if not response.committed:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Command accepted but not committed"
+                )
+        return DeleteResponse(success=True, message="Patient deleted successfully")
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())

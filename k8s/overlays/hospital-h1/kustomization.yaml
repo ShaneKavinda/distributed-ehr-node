@@ -1,0 +1,7 @@
+resources:
+- ../../base
+- namespace.yaml
+namespace: hospital-h1
+patchesStrategicMerge:
+- statefulset-patch.yaml
+- service-api-patch.yaml

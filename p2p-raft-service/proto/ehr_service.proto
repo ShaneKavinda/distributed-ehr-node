@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package ehr;
+
+// Import for JSON support
+import "google/protobuf/struct.proto";
+
+// Service definition
+service EhrService {
+    // Create a new patient record
+    rpc CreatePatient(CreatePatientRequest) returns (PatientResponse);
+
+    // Get a patient by UUID
+    rpc GetPatient(GetPatientRequest) returns (PatientResponse);
+
+    // Get all patients with pagination
+    rpc GetAllPatients(GetAllPatientsRequest) returns (GetAllPatientsResponse);
+
+    // Search patient by patient_id
+    rpc SearchPatientById(SearchPatientByIdRequest) returns (PatientResponse);
+
+    // Update a patient record
+    rpc UpdatePatient(UpdatePatientRequest) returns (PatientResponse);
+
+    // Delete a patient record
+    rpc DeletePatient(DeletePatientRequest) returns (DeletePatientResponse);
+}
+
+// Patient message - uses JSON structure for flexibility
+message PatientMessage {
+    string id = 1;  // UUID as string
+    int32 version = 2;
+    string lastUpdated = 3;
+
+    // Use JSON struct for nested complex data
+    google.protobuf.Struct identity = 4;
+    google.protobuf.Struct demographics = 5;
+    google.protobuf.Struct contacts = 6;
+
+    // Clinical data as JSON arrays
+    google.protobuf.ListValue conditions = 7;
+    google.protobuf.ListValue allergies = 8;
+
+    google.protobuf.Struct meta = 9;
+
+    string created_at = 10;
+    string updated_at = 11;
+}
+
+// Request messages
+message CreatePatientRequest {
+    // Send patient data as JSON for flexibility
+    google.protobuf.Struct patientData = 1;
+}
+
+message GetPatientRequest {
+    string patient_uuid = 1;  // UUID as string
+}
+
+message GetAllPatientsRequest {
+    int32 skip = 1;
+    int32 limit = 2;
+}
+
+message SearchPatientByIdRequest {
+    string patient_id = 1;
+}
+
+message UpdatePatientRequest {
+    string patient_uuid = 1;  // UUID as string
+    google.protobuf.Struct updateData = 2;  // JSON update data
+}
+
+message DeletePatientRequest {
+    string patient_uuid = 1;  // UUID as string
+}
+
+// Response messages
+message PatientResponse {
+    PatientMessage patient = 1;
+}
+
+message GetAllPatientsResponse {
+    repeated PatientMessage patients = 1;
+}
+
+message DeletePatientResponse {
+    bool success = 1;
+    string message = 2;
+}
