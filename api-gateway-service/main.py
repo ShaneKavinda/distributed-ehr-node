@@ -1,3 +1,9 @@
+import os
+import asyncio
+import grpc
+import grpc.aio
+from typing import List
+from fastapi import FastAPI, HTTPException, Query, Depends, status
 from grpc_client import GrpcClient
 from models import (
     PatientCreate,
@@ -6,8 +12,9 @@ from models import (
     DeleteResponse,
     ErrorResponse
 )
-from grpc_client import GrpcClient
 from p2p_client import P2PCommandClient
+from auth.auth import require_doctor, require_patient, require_doctor_or_patient
+from auth.routes import router as auth_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -77,14 +84,36 @@ async def create_patient(patient: PatientCreate, user=Depends(require_doctor)):
                     status_code=503,
                     detail="Command accepted but not committed"
                 )
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
-            result = await client.search_patient_by_id(patient.identity.patientId)
-            return PatientResponse(**result)
+
+        # Retry logic: Wait for the database to be updated after Raft commit
+        # The Raft commit listener applies the change asynchronously
+        max_retries = 5
+        retry_delay = 0.1  # 100ms between retries
+
+        for attempt in range(max_retries):
+            try:
+                async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+                    result = await client.search_patient_by_id(patient.identity.patientId)
+                    return PatientResponse(**result)
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND and attempt < max_retries - 1:
+                    # Patient not found yet, wait and retry
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    # Re-raise on last attempt or other errors
+                    raise
+
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.INVALID_ARGUMENT:
             raise HTTPException(status_code=400, detail=e.details())
         elif e.code() == grpc.StatusCode.ALREADY_EXISTS:
             raise HTTPException(status_code=409, detail=e.details())
+        elif e.code() == grpc.StatusCode.NOT_FOUND:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Patient creation confirmed by Raft but not found in database. This might indicate a replication delay. Patient ID: {patient.identity.patientId}"
+            )
         else:
             raise HTTPException(
                 status_code=500, detail=f"gRPC error: {e.details()}")
@@ -233,9 +262,24 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends
                     detail="Command accepted but not committed"
                 )
 
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
-            result = await client.get_patient(patient_uuid)
-            return PatientResponse(**result)
+        # Retry logic: Wait for the database to be updated after Raft commit
+        max_retries = 5
+        retry_delay = 0.1  # 100ms between retries
+
+        for attempt in range(max_retries):
+            try:
+                async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+                    result = await client.get_patient(patient_uuid)
+                    return PatientResponse(**result)
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND and attempt < max_retries - 1:
+                    # Patient not found yet (shouldn't happen for update, but just in case)
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    # Re-raise on last attempt or other errors
+                    raise
+
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())
