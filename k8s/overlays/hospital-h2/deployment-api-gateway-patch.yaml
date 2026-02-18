@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+spec:
+  template:
+    spec:
+      containers:
+      - name: api-gateway
+        env:
+        - name: NAMESPACE
+          value: hospital-h2

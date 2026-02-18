@@ -5,3 +5,4 @@ namespace: hospital-h4
 patchesStrategicMerge:
 - statefulset-patch.yaml
 - service-api-patch.yaml
+- deployment-api-gateway-patch.yaml
