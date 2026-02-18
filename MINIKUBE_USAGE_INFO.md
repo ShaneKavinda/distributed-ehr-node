@@ -19,7 +19,7 @@
 
 ## 1.1 High-Level Overview
 
-The system implements a **distributed EHR system** using **Raft consensus algorithm** for strong consistency across multiple nodes. Each hospital operates as an independent Kubernetes namespace with 3-node Raft cluster.
+The system implements a **distributed EHR system** using **Raft consensus algorithm** for strong consistency across multiple nodes. Each hospital operates as an independent Kubernetes namespace with a 3-node Raft cluster and a **centralized API Gateway** with automatic failover.
 
 ### Core Components
 
@@ -28,39 +28,57 @@ The system implements a **distributed EHR system** using **Raft consensus algori
 │                      Minikube Cluster                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Namespace: hospital-h1                                         │
+│                                                                 │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │ API Gateway Deployment (Separate Pod)                  │    │
+│  │ ┌────────────────────────────────────────────────────┐ │    │
+│  │ │ api-gateway :8080                                  │ │    │
+│  │ │ • Connects to all hospital pods via DNS           │ │    │
+│  │ │ • Auto-discovery & failover                       │ │    │
+│  │ │ • Retries on pod failure                          │ │    │
+│  │ └────────────────────────────────────────────────────┘ │    │
+│  └────────────────────────────────────────────────────────┘    │
+│         │                    │                    │             │
+│         ▼                    ▼                    ▼             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │ hospital-0   │  │ hospital-1   │  │ hospital-2   │         │
 │  │ (Pod)        │  │ (Pod)        │  │ (Pod)        │         │
-│  ├──────────────┤  ├──────────────┤  ├──────────────┤         │
-│  │ api-gateway  │  │ api-gateway  │  │ api-gateway  │         │
-│  │   :8080      │  │   :8080      │  │   :8080      │         │
-│  ├──────────────┤  ├──────────────┤  ├──────────────┤         │
+│  ├─────���────────┤  ├──────────────┤  ├──────────────┤         │
 │  │ p2p-raft     │◄─┼─► p2p-raft   │◄─┼─► p2p-raft   │         │
 │  │   :7001      │  │   :7001      │  │   :7001      │         │
 │  │ [LEADER]     │  │ [FOLLOWER]   │  │ [FOLLOWER]   │         │
 │  ├──────────────┤  ├──────────────┤  ├──────────────┤         │
 │  │ ehr-crud     │  │ ehr-crud     │  │ ehr-crud     │         │
-│  │   :50052     │  │   :50052     │  │   :50052     │         │
+│  │   :50051     │  │   :50051     │  │   :50051     │         │
 │  ├──────────────┤  ├──────────────┤  ├──────────────┤         │
 │  │ mongodb      │  │ mongodb      │  │ mongodb      │         │
 │  │   :27017     │  │   :27017     │  │   :27017     │         │
 │  │ [PVC: 1Gi]   │  │ [PVC: 1Gi]   │  │ [PVC: 1Gi]   │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  └──────────��───┘  └──────────────┘  └──────────────┘         │
 │                                                                 │
 │  Services:                                                      │
-│  • hospital-headless (ClusterIP: None) - Raft discovery        │
-│  • hospital-api (NodePort: 30080) - External API access        │
+│  • hospital-headless (ClusterIP: None) - Raft & pod discovery  │
+│  • api-gateway (NodePort: 30080) - External API access         │
+│  • hospital-api (ClusterIP) - Internal access (legacy)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Key Architecture Features:**
+- 🔄 **Centralized API Gateway** - Single deployment per namespace with automatic failover
+- 🎯 **Pod Discovery** - API Gateway discovers all hospital pods via DNS
+- ⚡ **Zero Downtime** - API survives hospital pod failures and restarts
+- 🔁 **Smart Retry** - Automatic failover to healthy pods on connection failures
+
 ### Service Breakdown
 
-| Service | Purpose | Technology | Port |
-|---------|---------|------------|------|
-| **API Gateway** | REST API for external clients | FastAPI (Python) | 8080 |
-| **P2P Raft** | Consensus & replication | Custom Raft (Python) | 7001 |
-| **EHR CRUD** | Database operations | gRPC (Python) | 50052 |
-| **MongoDB** | Data persistence | MongoDB 7.0 | 27017 |
+| Service | Purpose | Technology | Port | Deployment |
+|---------|---------|------------|------|------------|
+| **API Gateway** | REST API for external clients | FastAPI (Python) | 8080 | Separate Deployment (1 replica) |
+| **P2P Raft** | Consensus & replication | Custom Raft (Python) | 7001 | StatefulSet (3 replicas) |
+| **EHR CRUD** | Database operations | gRPC (Python) | 50051 | StatefulSet (3 replicas) |
+| **MongoDB** | Data persistence | MongoDB 7.0 | 27017 | StatefulSet (3 replicas) |
+
+**Note:** API Gateway runs independently from hospital pods, providing resilience and automatic failover to available pods.
 
 ## 1.2 Request Flow
 
@@ -383,30 +401,18 @@ kubectl get pods -A
 ### Get Service URL
 
 ```powershell
-# For hospital-h1
-minikube service hospital-api -n hospital-h1 --url
+# For api-gateway
+kubectl port-forward -n hospital-h1 deployment/api-gateway 8080:8080
 ```
-
-**Output:** `http://192.168.49.2:30080` (IP may vary)
 
 ### Test API
 
 ```powershell
 # Open Swagger UI in browser
-start http://192.168.49.2:30080/docs
+start http://127.0.0.1:8080/docs
 
 # Or test with PowerShell
-Invoke-RestMethod -Uri "http://192.168.49.2:30080/" -Method GET
-```
-
-### Alternative: Port Forwarding
-
-```powershell
-# Forward pod port to localhost
-kubectl port-forward -n hospital-h1 pod/hospital-0 8080:8080
-
-# Access at
-start http://localhost:8080/docs
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/" -Method GET
 ```
 
 ## 2.7 View Resources
@@ -434,8 +440,12 @@ kubectl describe pod hospital-0 -n hospital-h1
 ## 2.8 View Logs
 
 ```powershell
-# View specific container logs
-kubectl logs -n hospital-h1 hospital-0 -c api-gateway
+# View API Gateway logs (separate deployment)
+kubectl logs -n hospital-h1 deployment/api-gateway
+kubectl logs -n hospital-h1 deployment/api-gateway -f  # Follow logs
+kubectl logs -n hospital-h1 deployment/api-gateway --tail=50
+
+# View hospital pod container logs
 kubectl logs -n hospital-h1 hospital-0 -c ehr-crud
 kubectl logs -n hospital-h1 hospital-0 -c p2p-raft
 kubectl logs -n hospital-h1 hospital-0 -c mongodb
@@ -1195,7 +1205,7 @@ kubectl delete namespace hospital-h1
 |---------|------|----------|
 | API Gateway | 8080 | HTTP REST |
 | P2P Raft | 7001 | gRPC |
-| EHR CRUD | 50052 | gRPC |
+| EHR CRUD | 50051 | gRPC |
 | MongoDB | 27017 | MongoDB Wire |
 | NodePort (external) | 30080 | HTTP |
 

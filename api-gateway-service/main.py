@@ -5,6 +5,7 @@ import grpc.aio
 from typing import List
 from fastapi import FastAPI, HTTPException, Query, Depends, status
 from grpc_client import GrpcClient
+from grpc_cluster_client import GrpcClusterClient
 from models import (
     PatientCreate,
     PatientUpdate,
@@ -13,6 +14,7 @@ from models import (
     ErrorResponse
 )
 from p2p_client import P2PCommandClient
+from p2p_cluster_client import P2PClusterClient
 from auth.auth import require_doctor, require_patient, require_doctor_or_patient
 from auth.routes import router as auth_router
 
@@ -28,23 +30,94 @@ app = FastAPI(
 app.include_router(auth_router)
 
 # Configuration from environment variables
+# Legacy single-host mode (for local development)
 GRPC_HOST = os.getenv('GRPC_HOST', 'localhost')
 GRPC_PORT = int(os.getenv('GRPC_PORT', '50051'))
-API_HOST = os.getenv('API_HOST', '0.0.0.0')
-API_PORT = int(os.getenv('API_PORT', '8080'))
 P2P_HOST = os.getenv('P2P_HOST', 'localhost')
 P2P_PORT = int(os.getenv('P2P_PORT', '7001'))
-P2P_TIMEOUT = float(os.getenv('P2P_TIMEOUT', '3.0'))
+
+# Cluster mode configuration (for Kubernetes)
+P2P_SERVICE_NAME = os.getenv('P2P_SERVICE_NAME')  # e.g., 'hospital-headless'
+NAMESPACE = os.getenv('NAMESPACE')  # e.g., 'hospital-h1'
+STATEFULSET_NAME = os.getenv('STATEFULSET_NAME', 'hospital')
+HOSPITAL_REPLICAS = int(os.getenv('HOSPITAL_REPLICAS', '3'))
+
+# Common settings
+API_HOST = os.getenv('API_HOST', '0.0.0.0')
+API_PORT = int(os.getenv('API_PORT', '8080'))
+P2P_TIMEOUT = float(os.getenv('P2P_TIMEOUT', '5.0'))
+GRPC_TIMEOUT = float(os.getenv('GRPC_TIMEOUT', '5.0'))
+
+# Determine if running in cluster mode (TRUE WHEN DEPLOYED IN KUBERNETES)
+CLUSTER_MODE = P2P_SERVICE_NAME is not None and NAMESPACE is not None
+
+print("=" * 60)
+print("API Gateway Configuration")
+print("=" * 60)
+print(f"Mode: {'CLUSTER (Kubernetes)' if CLUSTER_MODE else 'SINGLE-HOST (Legacy)'}")
+if CLUSTER_MODE:
+    print(f"Namespace: {NAMESPACE}")
+    print(f"Service: {P2P_SERVICE_NAME}")
+    print(f"StatefulSet: {STATEFULSET_NAME}")
+    print(f"Replicas: {HOSPITAL_REPLICAS}")
+    print(f"P2P Port: {P2P_PORT}")
+    print(f"gRPC Port: {GRPC_PORT}")
+else:
+    print(f"P2P Server: {P2P_HOST}:{P2P_PORT}")
+    print(f"gRPC Server: {GRPC_HOST}:{GRPC_PORT}")
+print("=" * 60)
 
 
 @app.get("/", tags=["Health"])
 async def root():
     """Root endpoint - API health check"""
-    return {
-        "message": "EHR API Gateway is running",
-        "version": "1.0.0",
-        "grpc_server": f"{GRPC_HOST}:{GRPC_PORT}"
-    }
+    if CLUSTER_MODE:
+        return {
+            "message": "EHR API Gateway is running",
+            "version": "1.0.0",
+            "mode": "cluster",
+            "namespace": NAMESPACE,
+            "service": P2P_SERVICE_NAME,
+            "replicas": HOSPITAL_REPLICAS
+        }
+    else:
+        return {
+            "message": "EHR API Gateway is running",
+            "version": "1.0.0",
+            "mode": "single-host",
+            "grpc_server": f"{GRPC_HOST}:{GRPC_PORT}",
+            "p2p_server": f"{P2P_HOST}:{P2P_PORT}"
+        }
+
+
+def get_p2p_client():
+    """Factory function to get appropriate P2P client based on mode"""
+    if CLUSTER_MODE:
+        return P2PClusterClient(
+            service_name=P2P_SERVICE_NAME,
+            namespace=NAMESPACE,
+            statefulset_name=STATEFULSET_NAME,
+            replicas=HOSPITAL_REPLICAS,
+            port=P2P_PORT,
+            timeout_s=P2P_TIMEOUT
+        )
+    else:
+        return P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT)
+
+
+def get_grpc_client():
+    """Factory function to get appropriate gRPC client based on mode"""
+    if CLUSTER_MODE:
+        return GrpcClusterClient(
+            service_name=P2P_SERVICE_NAME,
+            namespace=NAMESPACE,
+            statefulset_name=STATEFULSET_NAME,
+            replicas=HOSPITAL_REPLICAS,
+            port=GRPC_PORT,
+            timeout_s=GRPC_TIMEOUT
+        )
+    else:
+        return GrpcClient(GRPC_HOST, GRPC_PORT)
 
 
 @app.post(
@@ -72,7 +145,7 @@ async def create_patient(patient: PatientCreate, user=Depends(require_doctor)):
 
     try:
         patient_data = patient.model_dump()
-        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+        async with get_p2p_client() as p2p:
             response = await p2p.submit_command("PATIENT_CREATE", patient_data)
             if not response.accepted:
                 raise HTTPException(
@@ -92,7 +165,7 @@ async def create_patient(patient: PatientCreate, user=Depends(require_doctor)):
 
         for attempt in range(max_retries):
             try:
-                async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+                async with get_grpc_client() as client:
                     result = await client.search_patient_by_id(patient.identity.patientId)
                     return PatientResponse(**result)
             except grpc.aio.AioRpcError as e:
@@ -142,7 +215,7 @@ async def get_patient(patient_uuid: str, user=Depends(require_doctor_or_patient)
         raise HTTPException(status_code=403, detail="Access denied")
 
     try:
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+        async with get_grpc_client() as client:
             result = await client.get_patient(patient_uuid)
             return PatientResponse(**result)
     except grpc.aio.AioRpcError as e:
@@ -180,7 +253,7 @@ async def get_all_patients(
     - **limit**: Maximum number of records to return (default: 100, max: 1000)
     """
     try:
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+        async with get_grpc_client() as client:
             results = await client.get_all_patients(skip=skip, limit=limit)
             return [PatientResponse(**r) for r in results]
     except grpc.aio.AioRpcError as e:
@@ -208,7 +281,7 @@ async def search_patient_by_id(patient_id: str, user=Depends(require_doctor)):
     - **patient_id**: The patient identifier (e.g., P001)
     """
     try:
-        async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+        async with get_grpc_client() as client:
             result = await client.search_patient_by_id(patient_id)
             return PatientResponse(**result)
     except grpc.aio.AioRpcError as e:
@@ -246,7 +319,20 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends
         if not patient_data:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+        # Pre-validation: Verify the patient exists before attempting update
+        try:
+            async with get_grpc_client() as client:
+                await client.get_patient(patient_uuid)
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Patient with UUID {patient_uuid} not found"
+                )
+            raise
+
+        # Submit update command to Raft
+        async with get_p2p_client() as p2p:
             response = await p2p.submit_command(
                 "PATIENT_UPDATE",
                 {"patient_uuid": patient_uuid, "update": patient_data},
@@ -262,24 +348,33 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends
                     detail="Command accepted but not committed"
                 )
 
-        # Retry logic: Wait for the database to be updated after Raft commit
+        # Post-validation: Retry logic to wait for the database to be updated after Raft commit
         max_retries = 5
         retry_delay = 0.1  # 100ms between retries
 
         for attempt in range(max_retries):
             try:
-                async with GrpcClient(GRPC_HOST, GRPC_PORT) as client:
+                async with get_grpc_client() as client:
                     result = await client.get_patient(patient_uuid)
                     return PatientResponse(**result)
             except grpc.aio.AioRpcError as e:
-                if e.code() == grpc.StatusCode.NOT_FOUND and attempt < max_retries - 1:
-                    # Patient not found yet (shouldn't happen for update, but just in case)
-                    await asyncio.sleep(retry_delay)
-                    continue
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    # Patient was deleted between pre-validation and post-validation
+                    # or update failed to apply
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    else:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Update command was committed but patient no longer exists in database"
+                        )
                 else:
-                    # Re-raise on last attempt or other errors
+                    # Re-raise other errors
                     raise
 
+    except HTTPException:
+        raise
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())
@@ -288,8 +383,6 @@ async def update_patient(patient_uuid: str, patient: PatientUpdate, user=Depends
         else:
             raise HTTPException(
                 status_code=500, detail=f"gRPC error: {e.details()}")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -312,7 +405,20 @@ async def delete_patient(patient_uuid: str, user=Depends(require_doctor)):
     - **patient_uuid**: The unique UUID of the patient
     """
     try:
-        async with P2PCommandClient(P2P_HOST, P2P_PORT, P2P_TIMEOUT) as p2p:
+        # First, verify the patient exists before attempting deletion
+        try:
+            async with get_grpc_client() as client:
+                await client.get_patient(patient_uuid)
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Patient with UUID {patient_uuid} not found"
+                )
+            raise
+
+        # Submit delete command to Raft
+        async with get_p2p_client() as p2p:
             response = await p2p.submit_command(
                 "PATIENT_DELETE",
                 {"patient_uuid": patient_uuid},
@@ -327,7 +433,32 @@ async def delete_patient(patient_uuid: str, user=Depends(require_doctor)):
                     status_code=503,
                     detail="Command accepted but not committed"
                 )
-        return DeleteResponse(success=True, message="Patient deleted successfully")
+
+        # Verify deletion succeeded by checking if patient no longer exists
+        # Wait a bit for the delete to propagate through Raft commit listeners
+        await asyncio.sleep(0.2)  # 200ms for commit listeners to apply
+
+        try:
+            async with get_grpc_client() as client:
+                await client.get_patient(patient_uuid)
+                # If we get here, patient still exists - deletion failed
+                raise HTTPException(
+                    status_code=500,
+                    detail="Delete command was committed but patient still exists in database"
+                )
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                # Perfect! Patient is gone, deletion succeeded
+                return DeleteResponse(success=True, message="Patient deleted successfully")
+            else:
+                # Some other error occurred
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error verifying deletion: {e.details()}"
+                )
+
+    except HTTPException:
+        raise
     except grpc.aio.AioRpcError as e:
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())
