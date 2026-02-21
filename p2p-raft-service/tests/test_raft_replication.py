@@ -9,6 +9,49 @@ import p2p_pb2.p2p_pb2 as p2p_pb2
 
 from models.event import Event
 from raft.node import RaftNode
+from raft.log_entry import RaftLogEntry
+from raft.log_entry import RaftLogEntry
+
+
+class MockAuditLog:
+    """In-memory mock audit log for testing"""
+    def __init__(self):
+        self._entries = []
+
+    def append(self, entry: RaftLogEntry):
+        self._entries.append(entry)
+
+    def get(self, index: int):
+        for entry in self._entries:
+            if entry.index == index:
+                return entry
+        return None
+
+    def get_range(self, start_index: int, end_index=None):
+        result = [e for e in self._entries if e.index >= start_index]
+        if end_index:
+            result = [e for e in result if e.index <= end_index]
+        return sorted(result, key=lambda x: x.index)
+
+    def get_all(self):
+        return sorted(self._entries, key=lambda x: x.index)
+
+    def get_last(self):
+        if not self._entries:
+            return None
+        return max(self._entries, key=lambda x: x.index)
+
+    def get_count(self):
+        return len(self._entries)
+
+    def delete_from(self, index: int):
+        self._entries = [e for e in self._entries if e.index < index]
+        return 0
+
+    def clear_all(self):
+        count = len(self._entries)
+        self._entries = []
+        return count
 
 
 class InMemoryTransport:
@@ -40,6 +83,7 @@ class RaftReplicationTests(unittest.TestCase):
         nodes = {}
         for node_id in node_ids:
             peers = [peer for peer in node_ids if peer != node_id]
+            audit_log = MockAuditLog()
             node = RaftNode(
                 node_id=node_id,
                 peer_ids=peers,
@@ -47,6 +91,7 @@ class RaftReplicationTests(unittest.TestCase):
                 election_timeout_ms=200,
                 heartbeat_interval_ms=50,
                 cluster_id="test",
+                audit_log=audit_log,
             )
             nodes[node_id] = node
             registry[node_id] = node
@@ -80,7 +125,10 @@ class RaftReplicationTests(unittest.TestCase):
             self.assertEqual(applied[node_id], ["cmd-1"])
             self.assertEqual(nodes[node_id].commit_index, 1)
             self.assertEqual(nodes[node_id].last_applied, 1)
-            self.assertEqual(nodes[node_id].log[0].event.command_id, "cmd-1")
+            # Check audit log instead of direct log access
+            entry = nodes[node_id].audit_log.get(1)
+            self.assertIsNotNone(entry)
+            self.assertEqual(entry.event.command_id, "cmd-1")
 
 
 if __name__ == "__main__":

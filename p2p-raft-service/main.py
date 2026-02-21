@@ -5,6 +5,7 @@ from grpc_server import GrpcServer
 from raft.node import RaftNode
 from raft.transport import GrpcTransport
 from raft.commit_tracker import CommitTracker
+from raft.audit_log import RaftAuditLog
 from replication.ehr_applier import EhrCommandApplier
 
 
@@ -18,7 +19,15 @@ def main() -> None:
     print(f"👥 Peers: {list(cfg.peers.keys())}")
     print(f"⏱️  Election Timeout: {cfg.election_timeout_ms}ms")
     print(f"💓 Heartbeat Interval: {cfg.heartbeat_interval_ms}ms")
+    print(f"💾 MongoDB: {cfg.mongodb_url}")
     print("=" * 80)
+
+    print("🔧 Initializing Raft audit log (MongoDB persistent storage)...")
+    audit_log = RaftAuditLog(
+        mongo_url=cfg.mongodb_url,
+        database_name=cfg.mongodb_database,
+        node_id=cfg.node_id,
+    )
 
     print("🔧 Initializing Raft transport layer...")
     transport = GrpcTransport(cfg.peers, cfg.rpc_timeout_ms / 1000.0)
@@ -31,6 +40,7 @@ def main() -> None:
         election_timeout_ms=cfg.election_timeout_ms,
         heartbeat_interval_ms=cfg.heartbeat_interval_ms,
         cluster_id=cfg.cluster_id,
+        audit_log=audit_log,
     )
 
     print("🔧 Initializing commit tracker...")

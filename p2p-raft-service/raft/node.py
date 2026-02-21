@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional
 from models.event import Event
 from raft.log_entry import RaftLogEntry
 from raft.transport import GrpcTransport
+from raft.audit_log import RaftAuditLog
 
 import p2p_pb2.p2p_pb2 as p2p_pb2
 
@@ -29,16 +30,20 @@ class RaftNode:
         election_timeout_ms: int,
         heartbeat_interval_ms: int,
         cluster_id: str,
+        audit_log: RaftAuditLog,
     ) -> None:
         self.node_id = node_id
         self.peer_ids = peer_ids
         self.transport = transport
         self.cluster_id = cluster_id
+        self.audit_log = audit_log
 
-        # Persistent state
+        # Persistent state (now actually persistent in MongoDB!)
         self.current_term: int = 0
         self.voted_for: Optional[str] = None
-        self.log: List[RaftLogEntry] = []
+        # Load existing log from MongoDB on startup
+        existing_entries = self.audit_log.get_all()
+        print(f"📚 Loaded {len(existing_entries)} existing log entries from audit log")
 
         # Volatile state
         self.commit_index: int = 0
@@ -93,12 +98,13 @@ class RaftNode:
         return self.leader_id or ""
 
     def last_log_index(self) -> int:
-        return len(self.log)
+        return self.audit_log.get_count()
 
     def last_log_term(self) -> int:
-        if not self.log:
+        last_entry = self.audit_log.get_last()
+        if last_entry is None:
             return 0
-        return self.log[-1].term
+        return last_entry.term
 
     def _quorum_size(self) -> int:
         return (len(self.peer_ids) + 1) // 2 + 1
@@ -201,7 +207,8 @@ class RaftNode:
                 event=event,
             )
             entry.event.raft_index = entry.index
-            self.log.append(entry)
+            # Persist to MongoDB
+            self.audit_log.append(entry)
             entry_index = entry.index
             print(f"📝 Leader appending command | Index: {entry_index} | Type: {event.command_type} | Term: {self.current_term}")
             if not self.peer_ids:
@@ -227,8 +234,14 @@ class RaftNode:
                 return
             next_idx = self.next_index.get(peer_id, 1)
             prev_index = next_idx - 1
-            prev_term = self.log[prev_index - 1].term if prev_index > 0 else 0
-            entries = self.log[prev_index:]
+            # Get previous term from audit log
+            if prev_index > 0:
+                prev_entry = self.audit_log.get(prev_index)
+                prev_term = prev_entry.term if prev_entry else 0
+            else:
+                prev_term = 0
+            # Get entries to replicate from audit log
+            entries = self.audit_log.get_range(next_idx)
             term = self.current_term
 
         proto_entries = [e.event.to_log_entry_proto(e.term) for e in entries]
@@ -277,7 +290,9 @@ class RaftNode:
         for index in range(self.commit_index + 1, self.last_log_index() + 1):
             replicated = sum(1 for m in self.match_index.values() if m >= index)
             if replicated + 1 >= self._quorum_size():
-                if self.log[index - 1].term == self.current_term:
+                # Check term from audit log
+                entry = self.audit_log.get(index)
+                if entry and entry.term == self.current_term:
                     self.commit_index = index
                     advanced = True
         if advanced:
@@ -363,8 +378,8 @@ class RaftNode:
             self.leader_id = request.leader_id
             self._reset_election_deadline()
 
-            # Minimal placeholder snapshot behavior.
-            self.log = []
+            # Clear all existing log entries when installing snapshot
+            self.audit_log.clear_all()
             self.commit_index = request.last_included_index
             self.last_applied = request.last_included_index
 
@@ -374,23 +389,25 @@ class RaftNode:
     def _log_matches(self, prev_log_index: int, prev_log_term: int) -> bool:
         if prev_log_index == 0:
             return True
-        if prev_log_index > len(self.log):
+        if prev_log_index > self.last_log_index():
             return False
-        return self.log[prev_log_index - 1].term == prev_log_term
+        entry = self.audit_log.get(prev_log_index)
+        return entry is not None and entry.term == prev_log_term
 
     def _delete_conflicting_entries(self, entries: List[RaftLogEntry]) -> None:
         for entry in entries:
-            local_index = entry.index - 1
-            if local_index >= len(self.log):
+            if entry.index > self.last_log_index():
                 return
-            if self.log[local_index].term != entry.term:
-                self.log = self.log[:local_index]
+            existing_entry = self.audit_log.get(entry.index)
+            if existing_entry and existing_entry.term != entry.term:
+                # Delete this entry and all following entries
+                self.audit_log.delete_from(entry.index)
                 return
 
     def _append_new_entries(self, entries: List[RaftLogEntry]) -> None:
         for entry in entries:
             if entry.index > self.last_log_index():
-                self.log.append(entry)
+                self.audit_log.append(entry)
 
     def _from_proto_entry(self, entry: p2p_pb2.LogEntry) -> RaftLogEntry:
         event = Event.from_log_entry_proto(entry, cluster_id=self.cluster_id)
@@ -407,7 +424,9 @@ class RaftNode:
         with self._lock:
             while self.last_applied < self.commit_index:
                 self.last_applied += 1
-                entries_to_apply.append(self.log[self.last_applied - 1])
+                entry = self.audit_log.get(self.last_applied)
+                if entry:
+                    entries_to_apply.append(entry)
 
         for entry in entries_to_apply:
             print(f"🔄 Applying committed entry | Index: {entry.index} | Type: {entry.event.command_type}")
