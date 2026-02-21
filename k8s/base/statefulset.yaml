@@ -66,6 +66,10 @@ spec:
           value: "50051"
         - name: COMMAND_TIMEOUT_MS
           value: "4000"
+        - name: MONGODB_URL
+          value: mongodb://localhost:27017
+        - name: MONGODB_DATABASE
+          value: raft_database
   volumeClaimTemplates:
   - metadata:
       name: mongo-data

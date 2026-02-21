@@ -20,6 +20,8 @@ class Config:
     ehr_grpc_host: str
     ehr_grpc_port: int
     ehr_rpc_timeout_ms: int
+    mongodb_url: str
+    mongodb_database: str
 
 
 def _parse_int(value: Optional[str], default: int) -> int:
@@ -82,4 +84,6 @@ def load_config() -> Config:
         ehr_grpc_host=os.environ.get("EHR_GRPC_HOST", "localhost"),
         ehr_grpc_port=_parse_int(os.environ.get("EHR_GRPC_PORT"), 50051),
         ehr_rpc_timeout_ms=_parse_int(os.environ.get("EHR_RPC_TIMEOUT_MS"), 800),
+        mongodb_url=os.environ.get("MONGODB_URL", "mongodb://localhost:27017"),
+        mongodb_database=os.environ.get("MONGODB_DATABASE", "raft_database"),
     )
