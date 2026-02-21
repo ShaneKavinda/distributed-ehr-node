@@ -10,3 +10,7 @@ spec:
         env:
         - name: NAMESPACE
           value: hospital-h1
+        - name: GRPC_TIMEOUT
+          value: "30.0"
+        - name: P2P_TIMEOUT
+          value: "30.0"
