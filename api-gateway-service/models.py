@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from enum import Enum
+from pydantic_mongo import EnumAnnotation
+from typing import Optional, List, Dict, Any, Annotated
 from datetime import date, datetime
 
 
@@ -44,7 +46,6 @@ class Condition(BaseModel):
     encounterId: Optional[str] = None
 
 
-
 class MetaInfo(BaseModel):
     """Metadata for distributed system"""
     sourceHospital: str
@@ -63,7 +64,7 @@ class PatientCreate(BaseModel):
         json_schema_extra = {
             "example": {
                 "identity": {
-                    "patientId": "P-2026-001",
+                    "patientId": "05061999-587K",
                     "mrn": "HOSP-A-123456"
                 },
                 "demographics": {
@@ -84,6 +85,27 @@ class PatientCreate(BaseModel):
                 "sourceHospital": "HOSP-A"
             }
         }
+
+
+class roleStatus(Enum):
+    PATIENT = "patient"
+    DOCTOR = "doctor"
+
+
+class userStatus(Enum):
+    PENDING = "pending"
+    REGISTERED = "registered"
+    INACTIVE = "inactive"
+
+
+class UserCreate(BaseModel):
+    """Model for creating new user in the auth-database"""
+    userName: str = Field(..., description="national ID number")
+    password: str = Field(..., description="user defined password(hashed)")
+    doctorID: Optional[str]
+    patientID: Optional[str]
+    role: Annotated[roleStatus, EnumAnnotation[roleStatus]]
+    userStatus: Annotated[userStatus, EnumAnnotation[userStatus]]
 
 
 class PatientUpdate(BaseModel):
