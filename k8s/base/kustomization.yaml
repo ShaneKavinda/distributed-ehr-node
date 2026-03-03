@@ -4,3 +4,4 @@ resources:
 - statefulset.yaml
 - deployment-api-gateway.yaml
 - service-api-gateway.yaml
+- mysql-replication.yaml

@@ -1,7 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
-from pydantic_mongo import EnumAnnotation
-from typing import Optional, List, Dict, Any, Annotated
+from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 
 
@@ -87,12 +86,12 @@ class PatientCreate(BaseModel):
         }
 
 
-class roleStatus(Enum):
+class RoleStatus(str, Enum):
     PATIENT = "patient"
     DOCTOR = "doctor"
 
 
-class userStatus(Enum):
+class UserStatus(str, Enum):
     PENDING = "pending"
     REGISTERED = "registered"
     INACTIVE = "inactive"
@@ -102,10 +101,31 @@ class UserCreate(BaseModel):
     """Model for creating new user in the auth-database"""
     userName: str = Field(..., description="national ID number")
     password: str = Field(..., description="user defined password(hashed)")
-    doctorID: Optional[str]
-    patientID: Optional[str]
-    role: Annotated[roleStatus, EnumAnnotation[roleStatus]]
-    userStatus: Annotated[userStatus, EnumAnnotation[userStatus]]
+    doctorID: Optional[str] = None
+    patientID: Optional[str] = None
+    role: RoleStatus
+    userStatus: UserStatus = UserStatus.PENDING
+
+    @model_validator(mode="after")
+    def validate_role_identifier(self):
+        if self.role == RoleStatus.DOCTOR and not self.doctorID:
+            raise ValueError("doctorID is required when role is doctor")
+        if self.role == RoleStatus.PATIENT and not self.patientID:
+            raise ValueError("patientID is required when role is patient")
+        return self
+
+
+class LoginRequest(BaseModel):
+    """Model for auth login"""
+    userName: str = Field(..., description="Registered username")
+    password: str = Field(..., description="Plain-text password")
+
+
+class AuthTokenResponse(BaseModel):
+    """Login response model"""
+    access_token: str
+    role: RoleStatus
+    token_type: str = "bearer"
 
 
 class PatientUpdate(BaseModel):

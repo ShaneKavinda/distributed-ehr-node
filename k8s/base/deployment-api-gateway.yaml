@@ -43,15 +43,68 @@ spec:
           value: "3"
         - name: STATEFULSET_NAME
           value: hospital
+        - name: AUTH_DB_REQUIRED
+          value: "true"
+        - name: AUTH_DB_INIT_MAX_ATTEMPTS
+          value: "60"
+        - name: AUTH_DB_INIT_RETRY_DELAY_SECONDS
+          value: "2"
+        - name: MYSQL_PRIMARY_HOST
+          value: mysql-primary
+        - name: MYSQL_PRIMARY_PORT
+          value: "3306"
+        - name: MYSQL_AUTH_DATABASE
+          value: auth_db
+        - name: MYSQL_AUTH_USER
+          value: auth_user
+        - name: MYSQL_AUTH_PASSWORD
+          value: auth_password
+        - name: MYSQL_REPLICA_HOSTS
+          value: mysql-replica-1,mysql-replica-2,mysql-replica-3
+        - name: MYSQL_REPL_USER
+          value: repl_user
+        - name: MYSQL_REPL_PASSWORD
+          value: repl_password
+        - name: MYSQL_REPL_STREAM_SERVER_ID
+          value: "101"
         livenessProbe:
           httpGet:
             path: /
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8080
+          failureThreshold: 60
+          periodSeconds: 5
         readinessProbe:
           httpGet:
             path: /
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
+      - name: auth-mysql-replicator
+        image: api-gateway-service:local
+        imagePullPolicy: IfNotPresent
+        command: ["python","-m","auth.mysql_replication_worker"]
+        env:
+        - name: MYSQL_PRIMARY_HOST
+          value: mysql-primary
+        - name: MYSQL_PRIMARY_PORT
+          value: "3306"
+        - name: MYSQL_AUTH_DATABASE
+          value: auth_db
+        - name: MYSQL_AUTH_USER
+          value: auth_user
+        - name: MYSQL_AUTH_PASSWORD
+          value: auth_password
+        - name: MYSQL_REPLICA_HOSTS
+          value: mysql-replica-1,mysql-replica-2,mysql-replica-3
+        - name: MYSQL_REPL_USER
+          value: repl_user
+        - name: MYSQL_REPL_PASSWORD
+          value: repl_password
+        - name: MYSQL_REPL_STREAM_SERVER_ID
+          value: "101"

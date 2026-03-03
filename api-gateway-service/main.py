@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 import grpc
 import grpc.aio
 from typing import List
@@ -17,6 +18,7 @@ from p2p_client import P2PCommandClient
 from p2p_cluster_client import P2PClusterClient
 from auth.auth import require_doctor, require_patient, require_doctor_or_patient
 from auth.routes import router as auth_router
+from auth.mysql_store import initialize_schema as initialize_auth_schema
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -47,6 +49,9 @@ API_HOST = os.getenv('API_HOST', '0.0.0.0')
 API_PORT = int(os.getenv('API_PORT', '8080'))
 P2P_TIMEOUT = float(os.getenv('P2P_TIMEOUT', '5.0'))
 GRPC_TIMEOUT = float(os.getenv('GRPC_TIMEOUT', '5.0'))
+AUTH_DB_REQUIRED = os.getenv('AUTH_DB_REQUIRED', 'false').lower() == 'true'
+AUTH_DB_INIT_MAX_ATTEMPTS = int(os.getenv('AUTH_DB_INIT_MAX_ATTEMPTS', '30'))
+AUTH_DB_INIT_RETRY_DELAY_SECONDS = float(os.getenv('AUTH_DB_INIT_RETRY_DELAY_SECONDS', '2.0'))
 
 # Determine if running in cluster mode (TRUE WHEN DEPLOYED IN KUBERNETES)
 CLUSTER_MODE = P2P_SERVICE_NAME is not None and NAMESPACE is not None
@@ -66,6 +71,34 @@ else:
     print(f"P2P Server: {P2P_HOST}:{P2P_PORT}")
     print(f"gRPC Server: {GRPC_HOST}:{GRPC_PORT}")
 print("=" * 60)
+
+
+@app.on_event("startup")
+def startup_event():
+    last_error = None
+    for attempt in range(1, AUTH_DB_INIT_MAX_ATTEMPTS + 1):
+        try:
+            initialize_auth_schema()
+            print(f"Auth MySQL schema initialized (attempt {attempt})")
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt == AUTH_DB_INIT_MAX_ATTEMPTS:
+                break
+            print(
+                f"Auth MySQL init attempt {attempt}/{AUTH_DB_INIT_MAX_ATTEMPTS} failed: {exc}. "
+                f"Retrying in {AUTH_DB_INIT_RETRY_DELAY_SECONDS}s..."
+            )
+            time.sleep(AUTH_DB_INIT_RETRY_DELAY_SECONDS)
+
+    if AUTH_DB_REQUIRED:
+        raise RuntimeError(
+            f"Auth MySQL initialization failed after {AUTH_DB_INIT_MAX_ATTEMPTS} attempts"
+        ) from last_error
+
+    print(
+        f"Auth MySQL initialization skipped after {AUTH_DB_INIT_MAX_ATTEMPTS} attempts: {last_error}"
+    )
 
 
 @app.get("/", tags=["Health"])
