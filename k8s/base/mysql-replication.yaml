@@ -1,0 +1,312 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-primary-init
+data:
+  01-primary-init.sql: |
+    CREATE USER IF NOT EXISTS 'repl_user'@'%' IDENTIFIED BY 'repl_password';
+    GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'repl_user'@'%';
+    GRANT ALL PRIVILEGES ON auth_db.* TO 'auth_user'@'%';
+    FLUSH PRIVILEGES;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-primary
+  labels:
+    app: mysql-primary
+spec:
+  selector:
+    app: mysql-primary
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-primary
+  labels:
+    app: mysql-primary
+spec:
+  serviceName: mysql-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-primary
+  template:
+    metadata:
+      labels:
+        app: mysql-primary
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - --server-id=1
+        - --log-bin=mysql-bin
+        - --binlog-format=ROW
+        - --binlog-row-image=FULL
+        ports:
+        - containerPort: 3306
+          name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: root_password
+        - name: MYSQL_DATABASE
+          value: auth_db
+        - name: MYSQL_USER
+          value: auth_user
+        - name: MYSQL_PASSWORD
+          value: auth_password
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: init-sql
+          mountPath: /docker-entrypoint-initdb.d/01-primary-init.sql
+          subPath: 01-primary-init.sql
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 10
+      volumes:
+      - name: init-sql
+        configMap:
+          name: mysql-primary-init
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-replica-1
+  labels:
+    app: mysql-replica-1
+spec:
+  selector:
+    app: mysql-replica-1
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-replica-1
+  labels:
+    app: mysql-replica-1
+spec:
+  serviceName: mysql-replica-1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-replica-1
+  template:
+    metadata:
+      labels:
+        app: mysql-replica-1
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - --server-id=2
+        ports:
+        - containerPort: 3306
+          name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: root_password
+        - name: MYSQL_DATABASE
+          value: auth_db
+        - name: MYSQL_USER
+          value: auth_user
+        - name: MYSQL_PASSWORD
+          value: auth_password
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-replica-2
+  labels:
+    app: mysql-replica-2
+spec:
+  selector:
+    app: mysql-replica-2
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-replica-2
+  labels:
+    app: mysql-replica-2
+spec:
+  serviceName: mysql-replica-2
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-replica-2
+  template:
+    metadata:
+      labels:
+        app: mysql-replica-2
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - --server-id=3
+        ports:
+        - containerPort: 3306
+          name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: root_password
+        - name: MYSQL_DATABASE
+          value: auth_db
+        - name: MYSQL_USER
+          value: auth_user
+        - name: MYSQL_PASSWORD
+          value: auth_password
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-replica-3
+  labels:
+    app: mysql-replica-3
+spec:
+  selector:
+    app: mysql-replica-3
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-replica-3
+  labels:
+    app: mysql-replica-3
+spec:
+  serviceName: mysql-replica-3
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-replica-3
+  template:
+    metadata:
+      labels:
+        app: mysql-replica-3
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - --server-id=4
+        ports:
+        - containerPort: 3306
+          name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: root_password
+        - name: MYSQL_DATABASE
+          value: auth_db
+        - name: MYSQL_USER
+          value: auth_user
+        - name: MYSQL_PASSWORD
+          value: auth_password
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi

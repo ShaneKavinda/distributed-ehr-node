@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from enum import Enum
 from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 
@@ -44,7 +45,6 @@ class Condition(BaseModel):
     encounterId: Optional[str] = None
 
 
-
 class MetaInfo(BaseModel):
     """Metadata for distributed system"""
     sourceHospital: str
@@ -63,7 +63,7 @@ class PatientCreate(BaseModel):
         json_schema_extra = {
             "example": {
                 "identity": {
-                    "patientId": "P-2026-001",
+                    "patientId": "05061999-587K",
                     "mrn": "HOSP-A-123456"
                 },
                 "demographics": {
@@ -84,6 +84,48 @@ class PatientCreate(BaseModel):
                 "sourceHospital": "HOSP-A"
             }
         }
+
+
+class RoleStatus(str, Enum):
+    PATIENT = "patient"
+    DOCTOR = "doctor"
+
+
+class UserStatus(str, Enum):
+    PENDING = "pending"
+    REGISTERED = "registered"
+    INACTIVE = "inactive"
+
+
+class UserCreate(BaseModel):
+    """Model for creating new user in the auth-database"""
+    userName: str = Field(..., description="national ID number")
+    password: str = Field(..., description="user defined password(hashed)")
+    doctorID: Optional[str] = None
+    patientID: Optional[str] = None
+    role: RoleStatus
+    userStatus: UserStatus = UserStatus.PENDING
+
+    @model_validator(mode="after")
+    def validate_role_identifier(self):
+        if self.role == RoleStatus.DOCTOR and not self.doctorID:
+            raise ValueError("doctorID is required when role is doctor")
+        if self.role == RoleStatus.PATIENT and not self.patientID:
+            raise ValueError("patientID is required when role is patient")
+        return self
+
+
+class LoginRequest(BaseModel):
+    """Model for auth login"""
+    userName: str = Field(..., description="Registered username")
+    password: str = Field(..., description="Plain-text password")
+
+
+class AuthTokenResponse(BaseModel):
+    """Login response model"""
+    access_token: str
+    role: RoleStatus
+    token_type: str = "bearer"
 
 
 class PatientUpdate(BaseModel):
